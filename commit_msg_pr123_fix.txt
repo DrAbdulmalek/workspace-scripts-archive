@@ -1,0 +1,35 @@
+fix(ci): close proven PR-caused CI failures on P0 branch
+
+CI closure for PR #123 (root-cause audit, evidence-first):
+
+1) hf-space mirror drift (hf-space-drift.yml, PROVEN PR-caused):
+   f69e31a edited packages/core files but left the hf-space snapshot
+   stale in two places:
+   - packages/core/api_server.py: the P0-A5 cloud-OCR fail-closed gate
+     (OMNI_ALLOW_CLOUD_OCR deny-by-default + _cloud_ocr_gate + 3 route
+     call sites) was missing from hf-space/packages/core/api_server.py.
+     This restores gate parity in the deployment mirror (strengthens
+     P0-A; no behavior weakened).
+   - packages/core/mobile/server.py: one comment line diverged
+     ("spell-check" vs "correct_text()"). Aligned to source wording.
+   Fixed via the repo's intended sync mechanism (scripts/sync-hf-space.sh).
+   Both drift layers now pass: sync --verify (exit 0) and
+   check_hf_space_drift.py (exit 0).
+
+2) P0 egress tests crash in CI's dependency set (python-ci.yml /
+   lint-test.yml "Run tests", exit 1):
+   tests/test_p0_phi_egress.py monkeypatches svc.Dataset /
+   svc.load_dataset, but hf_dataset_service only defines those module
+   globals when the optional `datasets` lib is importable — and CI never
+   installs it (only requirements/gradio.txt carries it). Local
+   replication of the exact CI command reproduced the failure
+   deterministically: 6 failed (AttributeError), 840 passed, 40 skipped.
+   Inject the fakes with raising=False (runtime resolves them as module
+   globals inside flush_queue()). No assertion changed; no gate
+   weakened; no test skipped or removed.
+
+Local verification (exact CI command; Python 3.12.14 vs CI 3.11 delta
+documented): 846 passed, 40 skipped, 0 failed. flake8 E999 clean on both
+workflow scopes. P0 four-file battery: 47 passed, 1 skipped.
+Static egress checks unchanged: no hardcoded public private=False;
+push_to_hub present only at the two known gated writers.

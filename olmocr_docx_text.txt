@@ -1,0 +1,697 @@
+
+
+O  M  N  I     M  E  D  I  C  A  L     S  U  I  T  E
+OLMoCR INTEGRATION
+DECISION REPORT
+Technical + Architectural Audit — audit and decision only, no implementation
+Repository: DrAbdulmalek/omni-medical-suite
+Branch: feat/ocr-consolidation-phase1 (local, untouched)
+Baseline: main = 39640a6d · PR #123 open, not merged
+Upstream audited: allenai/olmocr @ f7cfe4c (2026-03-25), v0.4.27
+Date: 2026-09-16 · Classification: OWNER-ONLY · Stop-gate: ACTIVE
+
+PRIMARY EXECUTION AGENT — PHASE 1 TRACK                                        AUDIT EDITION · NO CODE CHANGES
+
+Table of Contents
+TOC \h \o "1-2"
+	Executive Summary	 PAGEREF _Toc100000 \h 1
+	الملخص التنفيذي	 PAGEREF _Toc100001 \h 2
+	1. Scope, Authorization and Method	 PAGEREF _Toc100002 \h 2
+	2. Current OCR Architecture (Re-Verified)	 PAGEREF _Toc100003 \h 2
+	3. OLMoCR Exact Architecture (Upstream Audit)	 PAGEREF _Toc100004 \h 3
+	3.1 What OLMoCR actually is	 PAGEREF _Toc100005 \h 3
+	3.2 Verified technical requirements	 PAGEREF _Toc100006 \h 4
+	3.3 Page-boundary and document assembly behavior	 PAGEREF _Toc100007 \h 4
+	4. Exact Integration Point (Design Answer — Nothing Implemented)	 PAGEREF _Toc100008 \h 4
+	5. OCRResult Compatibility and Markdown Representation	 PAGEREF _Toc100009 \h 5
+	6. Arabic and RTL Capability Evidence	 PAGEREF _Toc100010 \h 5
+	7. PDF/Layout Capability Evidence (Tables, Equations, Multi-column)	 PAGEREF _Toc100011 \h 6
+	8. Capability Matrix vs Existing Engines	 PAGEREF _Toc100012 \h 7
+	9. Benchmark Requirements (Gate Before Any Integration)	 PAGEREF _Toc100013 \h 7
+	10. CI Feasibility and GPU Requirements	 PAGEREF _Toc100014 \h 8
+	11. Cost Analysis	 PAGEREF _Toc100015 \h 9
+	12. Security Review (Audit Only — No Changes Now)	 PAGEREF _Toc100016 \h 10
+	13. Licensing	 PAGEREF _Toc100017 \h 11
+	14. Alternatives: Marker, MinerU, Surya, TrOCR	 PAGEREF _Toc100018 \h 11
+	15. Integration Policies A–D (Analysis, No Final Choice)	 PAGEREF _Toc100019 \h 11
+	16. Risks	 PAGEREF _Toc100020 \h 12
+	17. Minimal Implementation Plan (Design Only — Requires Owner Approval)	 PAGEREF _Toc100021 \h 13
+	18. GO / NO-GO Criteria and Decision Request	 PAGEREF _Toc100022 \h 14
+	Annex A. Test-Count Discrepancy Resolution (238 vs 114)	 PAGEREF _Toc100023 \h 14
+	Annex B. Evidence Index	 PAGEREF _Toc100024 \h 16
+
+Note: This Table of Contents is generated via field codes. To ensure page number accuracy after editing, please right-click the TOC and select "Update Field."
+
+Executive Summary
+This report answers the owner stop-gate directive of 2026-09-16: perform an OLMoCR TECHNICAL + ARCHITECTURAL AUDIT only — no implementation, no merge, no push, no migration, no workflow creation. It also resolves the test-count contradiction (238 vs 114) recorded against the Phase-1 completion report; the full resolution with raw pytest evidence is in Annex A.
+Classification answer (owner question 6): OLMoCR is Option E — a hybrid OCR + document-understanding component. It is not a classic OCR engine: the toolkit renders each PDF page to a 1288-px image, sends it to a 7-billion-parameter vision-language model (a fine-tune of Qwen2.5-VL-7B-Instruct, served through vLLM), and returns Markdown with a YAML front matter block; equations are emitted as LaTeX and tables as HTML. The pipeline layer adds rendering, work-queue batching, retry ladders, and a pdftotext last-resort fallback. Upstream is active: v0.4.27 released 2026-03-12; code Apache-2.0; model weights Apache-2.0.
+The decisive negative finding concerns Arabic: the model card declares language: en only, the olmOCR-2 paper itself calls olmOCR-Bench an English-language benchmark, and the published training mix (olmOCR-mix-1025) is 91.3–99.8% English per subset with Arabic absent from every top-5 language list. Arabic capability is therefore classified UNPROVEN for every Arabic row of the capability matrix. The integration is architecturally clean — the exact integration points are the Phase-1 canonical adapter protocol, the benchmark wrapper family, and the packages/core registry/router — but a GO decision is conditional on an Arabic-inclusive benchmark that has not yet been run.
+الملخص التنفيذي
+نفّذنا تدقيقاً تقنياً ومعمارياً كاملاً لـ OLMoCR من مصدره الرسمي دون أي تنفيذ أو تعديل. النتيجة المعمارية: OLMoCR ليس محرك OCR تقليدياً بل نظام هجين (نموذج لغوي-بصري 7B مبني على Qwen2.5-VL مع خط معالجة PDF يخرج Markdown). نقاط التكامل الصحيحة محددة بدقة في القسم 4: طبقة العقد الكنوني من المرحلة الأولى، وغلاف القياس في benchmark_core، والسجل والموجّه في packages/core. أهم نتيجة سلبية: لا يوجد أي إثبات رسمي لدعم العربية؛ لغة التدريب إنجليزية بنسبة 91-99%، وبطاقة النموذج تذكر الإنجليزية فقط، ولذلك صُنفت جميع خلايا العربية كغير مثبتة (UNPROVEN). قرار GO/NO-GO مشروط بمعيار قياس عربي حقيقي لم يُنفذ بعد. كذلك حُسم التناقض بين رقمي الاختبارات: 238 = اختبارات مصفوفات الأرشيف (D5a+D5b) بينما 114 = تشغيل جمّع ثلاثة مواقع اختبار دون اختبارات D5b؛ العدد الفعلي الكامل لاختبارات المرحلة الأولى هو 258 ناجح و2 متخطى، ولا يوجد أي اختبار محذوف أو معاد تسميته.
+1. Scope, Authorization and Method
+The owner directive supersedes any earlier scope that could have been read as moving toward Phase 2–4 migration. The following are forbidden until a further explicit owner notice: any merge, any push, any deletion, any archive removal, any production caller migration, any PR merge (including PR #123), any main modification, and any Phase 2/3/4 migration work. The local branch feat/ocr-consolidation-phase1
+ was verified untouched: clean working tree at commit 0c41a45
+ on top of local main 39640a6dbba741eaf13e078dad64719e147ea79b
+, which matches the remote main exactly (checked 2026-09-16 via ls-remote). Nothing in this report required or performed a write to that repository.
+Method and status vocabulary. Every factual claim in this report carries one of four labels: PROVEN (verified this session against primary evidence, pinned to file:line or an API response), PARTIALLY PROVEN (verified but bounded — e.g. an upstream self-reported score on an English-only benchmark), UNPROVEN (no reliable evidence found this session), or CONTRADICTED (primary evidence contradicts a prior claim). Where upstream self-reports a capability score, the claim is graded at most PARTIALLY PROVEN because olmOCR-Bench is explicitly English-language and none of its categories is Arabic.
+Primary sources, all captured 2026-09-16: (a) an anonymous shallow clone of allenai/olmocr at HEAD f7cfe4c22098b154c76b6ec950d1c0a464eecf8d
+ (last commit 2026-03-25) inspected locally; (b) the PyPI JSON API for published release history; (c) Hugging Face API and raw model/dataset cards for allenai/olmOCR-2-7B-1025-FP8
+ and allenai/olmOCR-mix-1025
+; (d) Docker Hub registry API for image tags and sizes; (e) arXiv abstract 2510.19817 (olmOCR 2 paper); (f) docs.github.com for GPU runner availability; and (g) re-verification of the local omni-medical-suite architecture facts from Phase 1. The GitHub REST API was rate-limited (anonymous, 0/60 remaining), so GitHub-side facts were taken from the clone itself rather than the API; no token was used for any request, per the standing TOKEN-1 directive (deferred by owner; never touched).
+2. Current OCR Architecture (Re-Verified)
+All Phase-1 architecture findings were re-verified against the branch today and stand unchanged. Four parallel production OCR paths are PROVEN at main 39640a6d
+: (1) app/services/ocr_service.py
+ serving the Gradio HITL container and the mobile PWA server; (2) hf-space/app_core.py
+, the deployed Hugging Face Space mirror (kept in sync by scripts/check_hf_space_drift.py
+); (3) src/ocr/ensemble.py
+ OCREnsemble serving the desktop GUI; and (4) direct pytesseract calls on Android and Termux (mobile/android/main.py:293-301
+, mobile/termux/termux_app.py:275
+). The UnifiedOCR class in packages/omni_ocr/adapter.py
+ plus mixed_engine.py
+ remains LIBRARY-ONLY — zero production callers — and was not modified in Phase 1 per prompt v1.2.2 §12.
+The engine registry and router actually live in packages/core
+, not in packages/omni_ocr
+: EngineRegistry
+ (engine_registry.py:255
+, with register()
+ at :289, discover()
+ at :293 and a DEFAULT_ADAPTERS list of seven availability stubs at :272-280 including unwired QARI / Nougat / Qwen adapters), and EngineRouter
+ (engine_router.py
+ with engine-name constants at :15-23, RAM table at :25-33, and low/balanced/high profiles at :35-55). This distinction matters for OLMoCR: the router already has an unwired-stub pattern for GPU-capable engines, and OLMoCR can enter through exactly that pattern without touching any production path.
+The result-type landscape is inventoried in D1 (CONTRACT_FIELD_MAPPING.md): three pre-existing OCRResult contracts — A: SQLAlchemy ORM model (packages/file_processor/legacy/mobile_review/split/10-backend-api/models.py:42
+); B: stdlib dataclass (packages/omni_ocr/adapter.py:56-103
+); C: pipeline dataclass (apps/ocr-pipeline/src/engines/base_engine.py:118-150
+) — plus six wrapper families W1–W6. The Phase-1 canonical contract (packages/omni_ocr/contract/result.py:90
+) defines the 11+1-field frozen OCRResult with segments
+ as the canonical structural-unit name, an additive metadata
+ map, and a semver evolution policy under which additive optional fields or documented additive metadata keys are MINOR changes. The canonical adapter surface is the EngineAdapter
+ protocol (packages/omni_ocr/contract/adapter.py:48
+: engine_identity, capabilities, is_available(), execute(request) -&gt; OCRResult) and the fail-closed CloudGate
+ protocol at :95-115.
+Table 1. Component map — should OLMoCR integrate here? (owner question 7)
+Component
+Current location (verified)
+Role
+OLMoCR here?
+Why
+W1 production service
+app/services/ocr_service.py
+OCR path for Gradio HITL + mobile PWA
+NO (pre-benchmark)
+Changes production behavior; PROVEN live callers; migration must be proven, not assumed (§40 gate)
+W2 HF Space mirror
+hf-space/app_core.py
+Deployed Gradio/HF Space path
+NO
+Mirror of W1 with drift-control; no guaranteed GPU on Space hardware
+W3 desktop inline wrappers
+desktop/medical_doc_gui_v18.py:58-150
+Desktop GUI engine wrappers
+NO
+Desktop/CPU context; ≥12 GB VRAM requirement unrealistic for that path
+W4 src/ocr engines + ensemble
+src/ocr/*.py; ensemble.py:35
+Desktop OCR ensemble (text engines)
+NO
+Ensemble aggregates plain-text OCR; OLMoCR is not a text-OCR member of it
+W5 pipeline engines
+apps/ocr-pipeline/src/engines/*
+Self-contained pipeline app (contract C)
+DEFER
+Possible later parallel engine file, but pipeline is library-scoped; benchmark first
+W6 benchmark wrappers
+packages/benchmark_core/benchmarks/ocr/*.py
+Benchmark harness (CER/WER, latency)
+YES — FIRST
+Correct place to measure OLMoCR before any integration; matches existing benchmark_image pattern
+Engine Registry
+packages/core/engine_registry.py:255
+Runtime availability probing
+YES
+Add _OLMoCRAdapter(EngineAdapter) + DEFAULT_ADAPTERS entry; healthcheck must not load weights
+Engine Router
+packages/core/engine_router.py:15-55
+Engine selection + profiles
+YES (gated)
+ENGINE_OLMOCR constant, RAM entry, high/document profile only — default profiles untouched
+Canonical contract
+packages/omni_ocr/contract/
+Phase-1 canonical OCRResult + adapter protocol
+YES
+OLMoCR adapter implements EngineAdapter protocol and returns canonical OCRResult (engine="olmocr")
+UnifiedOCR library
+packages/omni_ocr/adapter.py + mixed_engine.py
+Mixed-engine chain (LIBRARY-ONLY)
+NO (initial)
+v1.2.2 §12: unchanged in initial phase; zero production callers
+medical-translation-bot / intake
+separate repo + packages
+Downstream consumer
+NO
+bot → central OCR adapter → core; never a direct OLMoCR dependency
+3. OLMoCR Exact Architecture (Upstream Audit)
+3.1 What OLMoCR actually is
+Owner question 6 offered five classifications. The evidence supports Option E: a hybrid OCR + document-understanding component — specifically a PDF-to-Markdown pipeline (option C) wrapped around a fine-tuned 7B vision-language model (option B/D characteristics), and not a conventional OCR engine (option A). Evidence: the upstream README describes “a toolkit for converting PDFs and other image-based document formats into clean, readable, plain text format” based on “a 7B parameter VLM, so it requires a GPU”; the HF config.json declares architectures: [Qwen2_5_VLForConditionalGeneration]
+ with FP8 compressed-tensors quantization; the model card states it is fine-tuned from Qwen/Qwen2.5-VL-7B-Instruct
+ on olmOCR-mix-1025 with additional GRPO reinforcement learning; and the olmOCR 2 paper (arXiv 2510.19817) describes training with reinforcement learning on verifiable binary unit tests. It recognizes no per-character boxes, exports no confidence scores, and does not segment words — all defining properties of the OCR engines already in this repository.
+Consequently, owner framing matters downstream: inside this repository OLMoCR would enter as a document-understanding engine that produces structured Markdown for whole pages, complementary to — not competing with — Tesseract/PaddleOCR text OCR. The v4 production prompt (prompts.py:164-171, the one actually wired at pipeline.py:139) instructs: return plain text as read naturally, convert equations to LaTeX and tables to HTML, label figures as ![Alt](page_startx_starty_width_height.png)
+, and emit a YAML front matter with primary_language, is_rotation_valid, rotation_correction, is_table and is_diagram. Notably the v4 prompt, unlike the older v1/v2 prompts, contains no handwriting instruction — handwriting support is therefore graded PARTIALLY PROVEN (historical claim) rather than PROVEN.
+3.2 Verified technical requirements
+Table 2. Per-item upstream status (owner question 5) — all evidence captured 2026-09-16
+Item
+Finding
+Status
+Evidence (primary source)
+Current release / version
+v0.4.27, released 2026-03-12; main HEAD f7cfe4c dated 2026-03-25
+PROVEN
+PyPI JSON (latest 0.4.27, 2026-03-12); CHANGELOG.md v0.4.27; olmocr/version.py 0.4.27; git log -1
+Project activity
+Active: releases Jan–Mar 2026 (v0.4.20–v0.4.27)
+PROVEN
+CHANGELOG.md entry dates; Docker Hub tag last_updated 2026-03-12
+Installation
+pip install olmocr; 4 documented options: base (remote server), [gpu], [beaker], [bench]; conda python=3.11 recommended; system package poppler-utils + fonts
+PROVEN
+README.md Installation section; pyproject.toml optional-dependencies
+Python requirement
+requires-python = &gt;=3.11
+PROVEN
+pyproject.toml [project] requires-python
+Core (CPU) dependencies
+pypdf&gt;=5.2.0, pypdfium2, Pillow, lingua-language-detector, markdown2, markdownify, ftfy, bleach, boto3, httpx, orjson, zstandard, filelock, cached-path, smart_open, cryptography, requests
+PROVEN
+pyproject.toml dependencies list (read from clone)
+vLLM dependency
+vllm==0.11.2 pinned exactly in [gpu] extra; transformers==4.57.3 pinned; torch&gt;=2.7.0
+PROVEN
+pyproject.toml [project.optional-dependencies].gpu
+CUDA
+CUDA 12.8 wheel index (cu128) documented; Docker base image vllm/vllm-openai:v0.11.2 (CUDA 12.x); v0.1.75 note: docker image updated to CUDA 12.8
+PROVEN
+README GPU install command; Dockerfile:1; README News v0.1.75
+GPU VRAM
+Recent NVIDIA GPU tested on RTX 4090, L40S, A100, H100; at least 12 GB GPU RAM
+PROVEN
+README Option 2 Local GPU Inference requirements
+Disk
+30 GB free disk space; Docker image 14.75 GB without model / 22.8 GB with model
+PROVEN
+README Option 2; Docker Hub API tag sizes 2026-03-12
+System RAM
+No minimum host-RAM figure published in README, docs, or Dockerfile
+UNPROVEN
+Absent from all inspected upstream files; registry would need an estimate at adapter time
+Model size
+10.08 GB on disk (3 FP8 safetensors shards: 4.94 + 4.03 + 1.09 GB)
+PROVEN
+HF API models/allenai/olmOCR-2-7B-1025-FP8?blobs=true
+Model architecture
+Qwen2_5_VLForConditionalGeneration, model_type qwen2_5_vl, FP8 W8A8 compressed-tensors (visual tower mostly excluded from quantization)
+PROVEN
+HF raw config.json
+Base model
+Qwen/Qwen2.5-VL-7B-Instruct (license: apache-2.0 tag verified)
+PROVEN
+HF model card lines 3-16; HF API tags for base model
+Inference architecture
+vllm serve spawned as subprocess with --served-model-name olmocr; OpenAI-compatible chat/completions; tensor/data-parallel options; --server mode for external vLLM providers
+PROVEN
+pipeline.py:807-846 (vllm_server_task); README remote-inference section
+Transformers-only loading
+Model card shows a plain-transformers example (AutoProcessor + Qwen2_5_VLForConditionalGeneration)
+PARTIALLY PROVEN
+HF card usage code; efficiency without vLLM not documented
+PDF preprocessing
+pdfinfo (MediaBox) then pdftoppm -png -r target_longest_image_dim*72/longest_dim (default 1288 px), subprocess list-form, 120 s timeout per page
+PROVEN
+olmocr/data/renderpdf.py:12-59; pipeline.py:1229
+Image handling in output
+Figures/charts labeled as markdown image placeholders with page coordinates; no image extraction
+PROVEN
+prompts.py:164-171 (v4 prompt)
+Markdown generation
+--markdown writes per-source .md under workspace/markdown/; model returns Markdown + YAML front matter (primary_language, rotation, is_table, is_diagram)
+PROVEN
+pipeline.py:654-695, 765-794; prompts.py PageResponse
+Tables
+Converted to HTML (v4/v3 prompts: th, rowspan, colspan; explicitly NOT markdown tables); olmOCR-Bench Tables category 84.9
+PARTIALLY PROVEN
+prompts.py v3/v4; model card bench table (self-reported, English benchmark)
+Equations
+LaTeX with \( \) inline and \[ \] block delimiters; unicode math discouraged; Old-scans-math bench 82.3
+PARTIALLY PROVEN
+prompts.py v3; model card bench table
+Multi-column documents
+Bench Multi-column category 83.7; README claims natural reading order with figures/multi-column/insets
+PARTIALLY PROVEN
+README features; model card bench table (self-reported, English)
+Reading order
+Natural reading order is the core design claim; RL-trained for it
+PARTIALLY PROVEN
+README; arXiv 2510.19817 abstract
+Headers / footers
+Removed by prompt instruction; bench Headers-and-footers category 96.1
+PARTIALLY PROVEN
+prompts.py v1-v4; bench table
+Arabic
+No claim anywhere: HF card language tag = en only; training mix 91.3–99.8% English; no Arabic bench category
+UNPROVEN
+HF card YAML; olmOCR-mix-1025 card language table; bench categories
+RTL scripts
+No RTL-specific handling found in prompts, code, or docs
+UNPROVEN
+grep of clone: zero Arabic/RTL mentions in README/prompts/docs
+Mixed Arabic/English
+No evidence; lingua language detector present but used only for English-centric filtering
+UNPROVEN
+olmocr/filter/filter.py:7,23; README --apply_filter help
+Batch processing
+Local/S3 work queue, pages_per_group, N workers, multi-node S3 coordination, Beaker cluster flag
+PROVEN
+pipeline.py work-queue; README multi-node section
+Multi-page PDFs
+Native: per-page processing joined per document; page spans preserved
+PROVEN
+build_dolma_document pipeline.py:602-636
+Failure modes
+Temperature retry ladder; sequential rotation retries (0/90/180/270); fallback to pdftotext (is_fallback); document discarded if fallback-page rate &gt; max_page_error_rate (default 1/250); render assert/timeout
+PROVEN
+pipeline.py:84-177, 233-248, 283-375, 557-561
+Licensing (code)
+Apache-2.0 (LICENSE + classifier + README License section)
+PROVEN
+LICENSE file; pyproject classifiers
+Licensing (model)
+Apache-2.0 on HF for olmOCR-2-7B-1025 and -FP8; base Qwen2.5-VL-7B-Instruct apache-2.0
+PROVEN
+HF API license tags (all three repos)
+“$200 / million pages”
+Claim IS present in current README (“Efficient, less than $200 USD per million pages converted”); no derivation published in the repository; recency = main 2026-03-25
+PARTIALLY PROVEN
+README.md Features list (read from clone); derivation absent — treat as vendor claim
+Community Arabic fine-tunes
+ma7dev/olmOCR-qari NOT FOUND on HF (query returned null) — CONTRADICTED as a premise; community Arabic LoRAs exist: hastyle/olmOCR-arabic-lora(-v2), base allenai/olmOCR-2-7B-1025, 16 downloads, Apache-2.0
+CONTRADICTED / UNPROVEN
+HF API models/ma7dev/olmOCR-qari (null); HF search API results
+GGUF / CPU builds
+No official GGUF; community lmstudio-community/olmOCR-2-7B-1025-GGUF exists (Apache-2.0); official pipeline is GPU-only
+PARTIALLY PROVEN
+HF search API; pyproject gpu extra
+3.3 Page-boundary and document assembly behavior
+For integration design it matters exactly how upstream assembles documents. build_dolma_document
+ (pipeline.py:602-636) joins per-page natural_text
+ values with a plain newline and records pdf_page_spans
+ — [start_char, end_char, page_num] per page — in the Dolma JSON metadata, alongside Source-File, olmocr-version, pdf-total-pages and token totals. The markdown file written by --markdown is therefore a flat concatenation in which page boundaries are recoverable only via the spans, not visible in the .md itself (pipeline.py:765-794 writes doc[“text”]). Any adapter in this repository must keep those spans so per-page provenance survives — see section 5.
+4. Exact Integration Point (Design Answer — Nothing Implemented)
+Owner question 8 demands the actual repository path, not a generic suggestion. Subject to owner approval and a passing benchmark, the integration would be:
+Table 3. Exact integration specification
+Element
+Exact answer
+repository
+DrAbdulmalek/omni-medical-suite — future branch feat/olmocr-central-engine created only after owner approval (no branch created now)
+file(s) — new
+packages/benchmark_core/benchmarks/ocr/olmocr.py (benchmark wrapper, first deliverable); packages/omni_ocr/contract/adapters/olmocr.py or packages/core/engines/olmocr_adapter.py (canonical adapter; final home to be fixed at implementation time, consistent with D6 note that Phase 2 decides the single home for the divergent router fork)
+file(s) — minimal edits
+packages/core/engine_registry.py (add _OLMoCRAdapter class + DEFAULT_ADAPTERS entry); packages/core/engine_router.py (ENGINE_OLMOCR constant at the :15-23 block, ENGINE_RAM_REQUIREMENTS entry, high/document PROFILE_ENGINES entry only)
+class
+_OLMoCRAdapter(packages.core.engine_registry.EngineAdapter) for probing; OLMoCRAdapter implementing packages.omni_ocr.contract.adapter.EngineAdapter protocol for execution
+method
+is_available() = importability of torch/vllm + torch.cuda.is_available(); healthcheck() must NOT load weights (report versions + CUDA state only, mirroring existing stubs at engine_registry.py:173-227); execute(request) renders via upstream olmocr library or subprocesses the olmocr CLI against a temp workspace, then maps output to canonical OCRResult
+interface
+packages/omni_ocr/contract/adapter.py:48 EngineAdapter protocol (engine_identity, capabilities, is_available(), execute -&gt; OCRResult); CloudGate (adapter.py:95-115) applies to any --server/remote mode; result type packages/omni_ocr/contract/result.py:90 OCRResult with engine="olmocr"
+registry
+EngineRegistry.DEFAULT_ADAPTERS (engine_registry.py:272-280) — append after existing 7; probe-based availability keeps the engine invisible unless its environment exists
+router
+EngineRouter: new constant ENGINE_OLMOCR = "OLMoCR"; estimated_ram_gb consistent with registry estimate; add to a new "document" profile and to "high"; do NOT add to low/balanced — default selection behavior must not change
+configuration
+new optional config block (olmocr: enabled/model/endpoint/timeout/max_pages/render_dim) consumed via EngineRouter.from_config pattern (engine_router.py:285-295); default enabled=false — fail-closed, explicit opt-in, mirroring the CloudGate/PR-123 philosophy
+What must NOT happen: no adapter inside app/services/ocr_service.py
+, hf-space/app_core.py
+, desktop/*
+ or medical-translation-bot
+; no new olmocr_pipeline/ olmocr_core/ olmocr_service/
+ duplicate stack (owner instruction 8 of the original task); no modification of packages/omni_ocr/adapter.py
+ or mixed_engine.py
+ in the initial phase (v1.2.2 §12); no new GitHub workflow in this phase (owner directive 14). The unified target architecture drawn in D6 (Applications → Thin OCR Adapter → packages/omni_ocr {Registry, Router, Contract} → engines stay in place → canonical OCRResult) already provides the slot OLMoCR would occupy: an engine behind the registry/router, reached through the contract layer, with production callers untouched until Phase 3 proves migration.
+5. OCRResult Compatibility and Markdown Representation
+Owner question 9 asks whether the current OCRResult needs a markdown
+ field, whether Markdown fits existing structure, or whether a separate DocumentResult
+ is required — without implementing anything. The canonical contract (contract/result.py:90
+) carries: text, segments (tuple of Segment: text, confidence, bbox, language, extras), confidence, engine, language, metadata (open, additive-else map with a documented closed key set), preprocessing, fallback_chain, provenance, warnings, errors, contract_version. Its evolution policy declares additive optional fields or documented additive metadata keys to be MINOR changes; unknown top-level keys are a hard error in from_dict, but metadata keys are explicitly open.
+Three options were analyzed against the information-preservation rule (nothing existing may be dropped; no silent loss):
+Option 1 — metadata["markdown"] + page-level segments (RECOMMENDED first step): the validated OLMoCR Markdown is stored verbatim in metadata.markdown; per-page Segments carry each page’s markdown fragment with extras {page_num, char_start, char_end} mirroring upstream pdf_page_spans; metadata.olmocr_front_matter keeps primary_language/rotation/is_table/is_diagram. Zero code change to result.py (metadata is additive-else); one documented mapping row; contract_version stays 1.0.0 or moves to 1.1.0 per policy documentation.
+Option 2 — named canonical field markdown: a typed, discoverable field; still only a MINOR bump (additive optional), but it edits the frozen dataclass, requires a full CONTRACT_FIELD_MAPPING decision row with information-preservation rationale, and touches every adapter/serializer test. Justified only after the benchmark proves OLMoCR value.
+Option 3 — separate DocumentResult: a new value type (pages[], markdown, spans, assets) for document-understanding engines. Most invasive: new contract surface, new converters, consumer migration. Deferred — there is exactly one candidate producer today; introducing a second result taxonomy for one producer violates the minimal-change discipline.
+Compatibility check against all four result sites: contract B consumers read text/confidence/engine/word_count — all present (word_count = len(segments) is derived, not stored, per result.py:185-188); contract C consumers read text/bbox/engine_name/metadata — compatible (bbox may be None per page-level segments; OLMoCR emits no confidence → confidence=None is contract-legal, recorded in provenance.confidence_source as engine-reported-none); contract A is a storage ORM mapping into metadata. Existing engine="none" semantics are untouched. The critical rule for the owner’s question 10 (never lose Markdown structure) is therefore procedural: OLMoCR output must be stored verbatim as validated Markdown and never flattened into .text alone; .text may carry the same content for legacy consumers, but structure (headings, HTML tables, LaTeX, figure placeholders, lists) lives in the markdown representation plus per-page segments, and downstream consumers that need plain text derive it themselves outside the OCR core (P6 separation).
+6. Arabic and RTL Capability Evidence
+Owner question 11 forbids assuming OLMoCR is good for Arabic and forbids inferring Arabic quality from generic multilingual support. The evidence aligns with that caution:
+Model card YAML (HF, allenai/olmOCR-2-7B-1025-FP8, lines 3-4): language: [en] — the only declared language. Status: PROVEN that upstream declares English-only.
+olmOCR-2 paper abstract (arXiv 2510.19817): “state-of-the-art performance on olmOCR-Bench, our English-language OCR benchmark” — the benchmark itself is English-language by the authors’ own words. Status: PROVEN.
+Training data (olmOCR-mix-1025 card, Language Distribution): 00_documents en 94.46%, 01_books en 91.28%, 02_loc_transcripts en 98.21%, 03_national_archives en 99.82%; the top-5 lists contain es/fr/id/de/la/hi/it/sv — Arabic appears in no top-5 list of any subset. Status: PROVEN for composition; consequence: Arabic capability UNPROVEN.
+Code-level: lingua language detection exists but is used by the optional English-centric spam/form filter (filter.py:7,23; --apply_filter help says “English pdfs”). No RTL, Arabic normalization, or Arabic-specific prompt logic exists anywhere in the clone (zero grep hits). Status: UNPROVEN capability, PROVEN absence of Arabic-specific handling.
+Community Arabic adaptation: hastyle/olmOCR-arabic-lora-v2 is a LoRA adapter on allenai/olmOCR-2-7B-1025 (Apache-2.0, 16 downloads, last modified 2026-01-01) — existence PROVEN, but training data, methodology and quality are undocumented at our verification depth: UNPROVEN quality, micro-adoption. The earlier task premise ma7dev/olmOCR-qari returns null from the HF API: CONTRADICTED (resource not found). NAMAA-Space/Qari-OCR-v0.3-VL-2B-Instruct exists but is a different, non-olmOCR model.
+The underlying base model, Qwen2.5-VL-7B-Instruct, is multilingual in principle, so plausible-but-unmeasured Arabic transcription ability cannot be excluded; that is precisely why the status is UNPROVEN rather than negative. For Arabic medical vocabulary (fracture, osteoporosis, osteomyelitis, ORIF, compartment syndrome and their Arabic forms) there is no evidence at all. The only path from UNPROVEN to a decision is the Arabic-inclusive benchmark specified in section 9; until then, any claim that OLMoCR is suitable for Arabic medical PDFs would be unsupported.
+7. PDF/Layout Capability Evidence (Tables, Equations, Multi-column)
+The strongest published evidence for the owner’s target capabilities (complex layouts, tables, equations, multi-column, structured Markdown) is upstream’s own olmOCR-Bench — 7,000+ test cases over ~1,400 documents — with the explicit caveat that it is English-language and self-reported. Current main README table for olmOCR v0.4.0 (pipeline with olmOCR-2-7B-1025-FP8): ArXiv 83.0; Old-scans-math 82.3; Tables 84.9; Old-scans 47.7; Headers-and-footers 96.1; Multi-column 83.7; Long-tiny-text 81.9; Base 99.7; Overall 82.4 ± 1.1. For context from the same table: Marker 1.10.1 overall 76.1, MinerU 2.5.4 75.2, Mistral OCR API 72.0, PaddleOCR-VL 80.0, Chandra 0.1.0 83.1. Status per category: PARTIALLY PROVEN (self-reported, English-only); Arabic rows do not exist.
+Mechanism evidence (PROVEN from code, independent of scores): the v4 prompt requests Markdown with LaTeX equations and HTML tables (header rows as &lt;th&gt;, rowspan/colspan supported, no &lt;br&gt; inside cells), figure/chart placeholders with page coordinates, header/footer removal, and a YAML front matter declaring is_table/is_diagram per page — the pipeline’s PageResponse object even carries is_table and is_diagram flags (prompts.py:68-104). Combined with the RLVR training emphasis (paper: largest gains in math formulas, table parsing, multi-column layouts), the design intent for exactly the owner’s listed capabilities is confirmed; the open question is only quantitative quality on our Arabic medical corpus, which no published number addresses. Handwriting: the v1/v2 prompts instructed reading natural handwriting, but the active v4 prompt does not, and bench has no handwriting category — graded PARTIALLY PROVEN as a historical claim, UNPROVEN for Arabic handwriting.
+8. Capability Matrix vs Existing Engines
+Owner question 12 requires that no cell be filled without evidence. Each cell below shows a status line (evidence vocabulary) and a one-line justification. “Ensemble” = the desktop OCREnsemble (src/ocr/ensemble.py) as representative of existing ensemble paths. Medical-text cells reflect PROVEN production usage in this repo, which is not the same as measured accuracy — accuracy columns belong to the pending benchmark (section 9).
+Table 4. Capability matrix (status = evidence status, not quality score)
+Capability
+Tesseract
+PaddleOCR
+Existing Ensemble
+OLMoCR
+Arabic text
+arabic task in registry :123; used in production pathsPROVEN live
+arabic task in registry :160; custom handwriting model dirPROVEN live
+inherits members; no Arabic-specific fusionPARTIALLY PROVEN
+no Arabic claim, no Arabic training share, no bench categoryUNPROVEN
+English text
+production use; latin taskPROVEN
+production usePROVEN
+run_all + confidence-weighted outputPROVEN
+bench Base 99.7 / Overall 82.4 (self-reported, English)PARTIALLY PROVEN
+Medical text
+production paths process medical docs; accuracy UNMEASUREDPROVEN usage
+same; custom paddle_handwriting modelPROVEN usage
+desktop medical GUIPROVEN usage
+no medical evaluation existsUNPROVEN
+Tables
+W4 output shapes have no table structureUNPROVEN
+registry table/layout task; PP-Structure claims not measured herePARTIALLY PROVEN
+text aggregation onlyUNPROVEN
+HTML table output; bench Tables 84.9 (English)PARTIALLY PROVEN
+Equations
+no LaTeX emission anywhere in W4/W5UNPROVEN
+no LaTeX emissionUNPROVEN
+text aggregation onlyUNPROVEN
+LaTeX \(\)/\[\] by design; bench old-scans-math 82.3PARTIALLY PROVEN
+Multi-column
+no layout modelUNPROVEN
+registry layout taskPARTIALLY PROVEN
+aggregation onlyUNPROVEN
+bench multi-column 83.7 (English)PARTIALLY PROVEN
+Reading order
+psm-dependent, no reorderingUNPROVEN
+not evidenced in repoUNPROVEN
+concatenation orderUNPROVEN
+core design claim; RLVR-trained; paper-level claimPARTIALLY PROVEN
+Markdown output
+plain text onlyNO
+plain text/lines onlyNO
+plain text onlyNO
+native Markdown + YAML front matter + HTML tables + LaTeXPROVEN
+CPU execution
+binary CPU enginePROVEN
+CPU mode used in servicePROVEN
+members are CPU-capablePROVEN
+GPU required per README; community GGUF exists → CPU path PARTIALLY PROVEN, quality UNPROVENNO (official)
+GPU execution
+no GPU pathN/A
+GPU supportedOptional
+per memberOptional
+≥12 GB VRAM NVIDIA; vLLM pinned 0.11.2REQUIRED
+Cost profile
+CPU seconds; no license costPROVEN lowest
+CPU/GPU secondsLow
+N engines × CPULow–moderate
+GPU rental or API tokens; see section 11; &lt;$200/M pages is an upstream claimESTIMATE
+Offline
+fully offlinePROVEN
+fully offline after model downloadPROVEN
+fully offlinePROVEN
+local pipeline offline after model download; S3/server modes optionalPROVEN
+Handwriting
+weak Arabic handwriting evidenceUNPROVEN AR
+models/paddle_handwriting custom dir :50PROVEN usage
+via membersPARTIALLY PROVEN
+v1/v2 prompts mention handwriting; active v4 prompt does not; no bench category; Arabic handwriting UNPROVENPARTIALLY PROVEN claim
+9. Benchmark Requirements (Gate Before Any Integration)
+No capability claim about OLMoCR may graduate from PARTIALLY PROVEN/UNPROVEN without a measured benchmark on owner-approved data. The benchmark design reuses the Phase-1 D4 discipline (manifest schema F11/E.2, PHI-free corpus, owner-gated corpus inputs, frozen corpus, characterization-vs-E2E separation) and adds OLMoCR as a fourth engine through the W6 benchmark wrapper (packages/benchmark_core/benchmarks/ocr/olmocr.py, mirroring the existing benchmark_image → {text, num_blocks, avg/min/max confidence, latency} pattern).
+Corpus (20–50 pages, owner-approved before acquisition): Arabic printed text; Arabic medical text; English medical text; Arabic-English mixed lines (e.g. “Open reduction and internal fixation (ORIF)”); native tables; mathematical/equation content; multi-column pages; clean scanned pages; poor-quality scans; handwriting samples. Existing repo assets (training-data/samples, medical-ocr-benchmarks data, scanner-fixer verification scans) are candidates but the D4 corpus grant remains owner-gated and was NOT frozen in Phase 1.
+Text metrics: CER and WER per engine per category (packages/benchmark_core already implements CER/WER decomposition in benchmarks/ocr/*.py run() outputs).
+Structure metrics: heading preservation, paragraph order, table row/column/cell-relationship preservation (table_parsing style checks), equation validity (LaTeX parse), column ordering (full-column-1-then-column-2, never interleaved lines), markdown round-trip validity.
+Arabic-specific metrics: Arabic character accuracy, RTL ordering correctness, diacritics handling, Arabic medical terminology retention (orthopedic/clinical terms bilingual), mixed-direction line integrity.
+Operational metrics: runtime/page, host RAM, GPU VRAM, CPU, disk, failure rate (fallback-page rate upstream equivalent), cold-start model load time; measured on the same host for all engines where applicable; OLMoCR numbers require a GPU host (section 10).
+Decision rule fixed in advance: OLMoCR may become a document-engine candidate only if it beats the existing ensemble on structure metrics for English categories AND does not fail catastrophically on Arabic categories; otherwise it is NO-GO regardless of layout brilliance (owner instruction 42: layout strength alone suggests hybrid division of labor, not replacement).
+10. CI Feasibility and GPU Requirements
+Can the current CI run OLMoCR? NO. Evidence: all 24 workflow files in .github/workflows/ declare runs-on ubuntu-latest or ubuntu-22.04; no self-hosted or GPU runner label exists anywhere (grep evidence); ocr-core-gate.yml:19 explicitly notes no GPU is required by design. GitHub-hosted standard runners provide no GPU and 14 GB disk — the model alone is 10.08 GB before vLLM’s CUDA runtime. The unit-test layer of a future OLMoCR adapter (mocked, no model) WILL run in current CI; anything that loads weights will not.
+Table 5. Execution options (status today; no workflow created per owner directive)
+Option
+Verdict
+Basis
+Current CI (ubuntu-latest / ubuntu-22.04)
+NO
+No GPU; 14 GB disk &lt; 10.08 GB model + runtime; verified from workflows
+Self-hosted GPU runner
+POSSIBLE, not available
+Technically supported by Actions; requires owner hardware + runner registration; none registered today
+GitHub-hosted GPU larger runners
+PARTIALLY PROVEN
+docs.github.com (larger runners) confirms GPU-powered runners exist (paid plans, Azure-backed); availability for THIS account/plan UNPROVEN without owner billing access
+Docker (alleninstituteforai/olmocr) on CI
+NO
+Same GPU constraint inside container; image 22.8 GB with model
+Manual workflow_dispatch GPU job
+VIABLE, DEFERRED
+Design exists (olmocr-gpu.yml gated on self-hosted/GPU label); NOT created per owner stop-gate
+Local GPU worker (off-CI)
+VIABLE
+Matches repo precedent: local verification scripts + handoff bundle pattern; recommended for the benchmark phase
+External GPU service (RunPod/Modal/Replicate/DeepInfra)
+VIABLE, OPTIONAL
+olmocr --server mode accepts OpenAI-compatible endpoints (README verified-providers table); must remain optional + explicit opt-in (privacy: copyrighted/proprietary books must not default to external APIs)
+11. Cost Analysis
+The owner challenged the $200/million-pages figure. Verdict: the claim is present verbatim in the current upstream README (“Efficient, less than $200 USD per million pages converted”, main f7cfe4c, 2026-03-25) — so it is PROVEN as an upstream claim — but no derivation, hardware assumption, or date-of-measurement is published in the repository, so it must be treated as a vendor figure and cross-checked independently. The same README publishes verified external provider unit prices (tested by upstream with olmOCR-2-7B-1025-FP8): Cirrascale $0.07/$0.15, DeepInfra $0.09/$0.19, Parasail $0.10/$0.20 per 1M input/output tokens. Those are the only third-party-verifiable unit prices available this session.
+Per-page token consumption is not published in the repository (sample bench data carries no usage stats), so page-level cost cannot be PROVEN from public data. The arithmetic below is therefore labeled ESTIMATE with explicit assumptions, to be replaced by measured values from the section-9 benchmark: input ≈ 1,500–3,000 tokens/page (page image + prompt), output ≈ 700–1,500 tokens/page (natural text + front matter). Using DeepInfra mid prices:
+per page (min)  = 1500×$0.09/1M + 700×$0.19/1M  = $0.000268  → $268 / M pages
+per page (mid)  = 2250×$0.09/1M + 1100×$0.19/1M = $0.000410  → $410 / M pages
+per page (max)  = 3000×$0.09/1M + 1500×$0.19/1M = $0.000555  → $555 / M pages
+Table 6. Cost scenarios (ESTIMATE, DeepInfra mid $0.00041/page unless stated; currency USD)
+Scenario
+Pages
+API estimate (range)
+Against upstream &lt;$200/M claim
+One 300-page book
+300
+$0.08 – $0.17 (mid ≈ $0.12)
+$0.06 by the upstream claim
+200 books / year
+60,000
+$16 – $33 / year (mid ≈ $25)
+$12 / year
+1,000 books / year
+300,000
+$81 – $167 / year (mid ≈ $123)
+&lt;$60 / year
+Interpretation: (a) even the pessimistic API estimate is operationally trivial at this library scale — cost is NOT the deciding factor for 200–1,000 books/year; (b) the API path is plausibly 1.3–2.8× the upstream claim, which is consistent with the claim describing optimized self-hosted batch inference, not serverless APIs; (c) self-hosted GPU cost cannot be estimated PROVEN this session because rental market pricing was not verified — recorded UNPROVEN; the binding constraint is instead the ≥12 GB VRAM hardware requirement and the ≈30 GB disk per worker; (d) whichever path is chosen, caching by SHA256(document)+engine+model+configuration (original task item 23) applies before any cost estimate becomes real spend, and any external-API use must be explicit opt-in per the privacy rule.
+12. Security Review (Audit Only — No Changes Now)
+Reviewed against the owner’s checklist: malicious PDF, subprocess, shell injection, path traversal, temporary files, unsafe deserialization, model loading, network access, untrusted artifacts. Findings, none of which were acted upon:
+Subprocess surface (PROVEN, upstream): renderpdf.py invokes pdfinfo and pdftoppm in list-form subprocess (no shell=True) with a 120 s timeout per page; pipeline.py spawns vllm serve via asyncio.create_subprocess_exec. Untrusted PDFs are parsed by poppler (C++) — the same trust boundary tesseract already has in this repo — but poppler’s CVE history means the OLMoCR worker should run in a container with limited egress, as the repo’s Docker pattern already does for other engines.
+No shell injection vector found in upstream (no shell=True in the inspected paths). Path traversal: get_markdown_path (pipeline.py:654-694) explicitly strips ‘..’ components and forces outputs under workspace/markdown/ — defense present, though symlink handling is not addressed; our adapter would keep the same containment rule (input path must never control output outside a temp workspace).
+Temporary files: process_single_pdf downloads to a temp file and unlinks in finally (pipeline.py:588-599); acceptable, but our adapter must add size/page-count caps — upstream has NO decompression-bomb guard (a 10,000-page PDF would render 10,000 pages unless the error-rate discard triggers); this is an adapter-time responsibility (max_pages/timeout config proposed in section 4).
+Unsafe deserialization: none found — no pickle usage in the inference path; model loading is safetensors via HF/vLLM. Model artifacts must be pinned: adapter config fixes model id (allenai/olmOCR-2-7B-1025-FP8) and should verify the HF revision hash before load (untrusted-artifact rule).
+Network: local pipeline is offline after model download (PROVEN); S3 coordination, --server endpoints and provider API keys are opt-in paths. In this repository any remote mode must pass the canonical CloudGate protocol (fail-closed, explicit opt-in, PHI policy check) — the same two-state contract D3 delivered. Standing rule re-affirmed: LOCAL OCR FAILURE ≠ PERMISSION TO UPLOAD PHI; any public HF upload containing OCR data is a security finding (v1.2.2 §7/28).
+vLLM server binding: vllm_server_task serves on args.port (default from CLI) — on a shared host it must bind localhost only; that is configuration hygiene for the implementation phase, recorded here, not changed now.
+13. Licensing
+Table 7. License inventory (verified 2026-09-16)
+Component
+License
+Status
+Note
+olmocr code (allenai/olmocr)
+Apache-2.0
+PROVEN
+LICENSE file + pyproject classifier + README License section
+olmOCR-2-7B-1025 / -FP8 weights
+Apache-2.0
+PROVEN
+HF API license tags, both repos
+Base model Qwen2.5-VL-7B-Instruct
+Apache-2.0
+PROVEN
+HF API license tag — the 7B size is Apache (unlike some larger Qwen sizes)
+vLLM 0.11.2
+Apache-2.0
+PROVEN
+upstream project license; pinned dependency
+poppler-utils (pdftoppm/pdfinfo/pdftotext)
+GPL-2.0+ (binaries)
+PROVEN
+Used as EXTERNAL subprocess binaries, not linked libraries — GPL does not propagate to the caller through exec; apt-installed at deployment; fine for the open-source goal, keep it an external process
+Community GGUF (lmstudio-community/olmOCR-2-7B-1025-GGUF)
+Apache-2.0
+PARTIALLY PROVEN
+community re-packaging; existence verified via HF API
+flashinfer wheel (optional accelerator)
+Not verified this session
+UNPROVEN
+optional pip extra; review at implementation time
+Training datasets (olmOCR-mix-1025 etc.)
+Not verified this session
+UNPROVEN
+Only relevant if fine-tuning is ever attempted (out of scope)
+Conclusion for the owner’s open-source goal: the OLMoCR stack (code + weights + base model) is uniformly Apache-2.0, which is compatible with proprietary and open-source use alike. The only nuance is poppler’s GPL — safe as an external binary, a fact the repo already relies on for tesseract’s ecosystem. License compatibility is therefore not a blocker; the Arabic capability question remains the blocker.
+14. Alternatives: Marker, MinerU, Surya, TrOCR
+Owner question 13 of the review requires the alternatives to be on the table with evidence, not assumed superior. Verified snapshots (PyPI/official sources, 2026-09-16), plus their standing in upstream’s own olmOCR-Bench comparison table (English, self-reported): Marker 1.10.1 overall 76.1; MinerU 2.5.4 overall 75.2; Surya is a layout/OCR component inside Marker’s ecosystem; TrOCR is a handwriting-oriented encoder-decoder already used in this repo.
+Table 8. Alternatives snapshot
+Alternative
+Verified version / license
+Relevance
+Status for our Arabic goal
+Marker (datalab marker-pdf)
+2.0.0, Apache-2.0 (PyPI)
+PDF→Markdown converter, GPU-friendly; bench overall 76.1 (English)
+PARTIALLY PROVEN
+MinerU (opendatalab)
+3.4.5 (PyPI); license moved from AGPLv3 to a custom MinerU Open Source License based on Apache-2.0 at 3.1.0 (README lines 122-132)
+Strong table/layout pipeline; bench 75.2; PPTX/XLSX export
+PARTIALLY PROVEN
+Surya (datalab surya-ocr)
+0.22.1, Apache-2.0 (PyPI)
+ALREADY IN REPO: src/layout/surya_analyzer.py:31 wrapped by src/ocr/ensemble.py:561; layout+OCR lines
+PROVEN in-repo
+TrOCR (microsoft)
+microsoft/trocr-*, MIT (model repo); already used: packages/omni_ocr/mixed_engine.py:50-60 + apps/ocr-pipeline trocr_engine.py
+Handwriting line recognition; not a layout/markdown engine
+PROVEN in-repo
+Two material observations. First, every alternative shares the same Arabic blindness at the evidence level — none publishes an Arabic document-understanding benchmark either, so swapping OLMoCR for Marker/MinerU would not resolve the owner’s Arabic question; it would only trade it. Second, license friction differs: Marker/Surya/TrOCR are clean Apache-2.0/MIT, MinerU’s custom license (post-AGPL, Apache-based) requires a read before adoption. The benchmark in section 9 is therefore designed to be engine-agnostic — the same corpus and harness can evaluate Marker or MinerU later at near-zero extra design cost.
+15. Integration Policies A–D (Analysis, No Final Choice)
+Table 9. Policy trade-off analysis (owner question 13 of the review)
+Policy
+Description
+Advantages
+Risks
+A — failure fallback
+Tesseract → failure → OLMoCR
+Simple mental model; reuses fallback_chain field
+Mismatched abstraction (a 7B VLM is not a text-OCR fallback); GPU dependency on the hot path; latency and cost spikes on failure; violates “no silent fallback” unless heavily instrumented; owner explicitly forbids automatic fallback
+B — document classification routing
+Simple docs → existing OCR; complex docs → OLMoCR
+Best architectural fit for a document-understanding engine; uses the existing router profile mechanism; deterministic
+Requires a reliable classifier (page complexity/tables/equations signals — OLMoCR’s own front matter is post-hoc); misrouting sends hard pages to weak engines; needs benchmark thresholds first
+C — dual-run structural comparison
+existing OCR + OLMoCR → structural comparison
+Highest evidence yield; builds the HITL/comparison muscle the repo already has (comparison tables in ensemble)
+2× compute; needs a diff/merge policy; useful as a BENCHMARK mode and a transition mode, heavy as a permanent mode
+D — OLMoCR only for PDF/document understanding
+OLMoCR scoped to PDF→Markdown; text OCR stays existing
+Cleanest boundary; zero disruption to 4 production paths; matches what upstream actually is; Markdown structure preserved by design
+Adds a second output representation (handled in section 5); still needs GPU ops; Arabic value remains unproven — D could conclude “not worth it” and that is an acceptable outcome
+Recommended direction (not a decision): start with D as the scoping principle and C as the measurement mode, evolve into B if the benchmark proves Arabic+structure value; never implement A as an automatic path (the owner’s stop-gate and the repo’s fail-closed contract both forbid it; any fallback must record engine_attempted, failure_reason, fallback_engine, final_engine — the canonical contract already carries fallback_chain + provenance + warnings for exactly this).
+16. Risks
+Arabic capability (TOP RISK): every Arabic row is UNPROVEN; if the benchmark fails Arabic categories, OLMoCR’s role collapses to English-layout-only or nothing. Mitigation: benchmark gate before any integration decision.
+Dependency conflict (PROVEN, concrete): the repo pins transformers&gt;=5.10,&lt;5.13 across 4 requirements files (TASK-02D remediation, with TrOCR compatibility bound found by binary search), while olmocr[gpu] pins transformers==4.57.3 and vllm==0.11.2. These are INCOMPATIBLE in one Python environment — therefore OLMoCR must run in a separate environment/container/worker (Docker image vllm/vllm-openai base or the official olmocr image), never inside the main app venv. This constrains the architecture toward the section-4 worker pattern.
+GPU operations burden: ≥12 GB VRAM + ≈30 GB disk per worker; no GPU exists in CI today; procurement/rental decision is owner-side.
+Upstream cadence and drift: vLLM/transformers pins move fast upstream (v0.4.x releases Jan–Mar 2026); doc drift already observed inside upstream (README --model help text says olmOCR-7B-0725-FP8 while pipeline.py:1213-1214 defaults to olmOCR-2-7B-1025-FP8 — code wins). Pinning + provenance.model_identifier mitigates.
+Dead-abstraction risk (Vyce-noted in Phase 1): registering OLMoCR in the registry/router without any production caller could add another unwired stub (like QARI/Nougat/Qwen today). Mitigation: benchmark-first integration proves value before wiring; registry entry only makes it probeable.
+Scope creep: OLMoCR brings a pipeline toolkit (S3, Beaker, filters) that must NOT be adopted wholesale; only the model-inference path is relevant. The adapter must wrap the model call, not import the fleet tooling.
+Privacy/licensing of inputs: books may be copyrighted/proprietary; external API modes are opt-in only; local execution is the default (v1.2.2 §27).
+17. Minimal Implementation Plan (Design Only — Requires Owner Approval)
+If the owner approves the benchmark phase (not implementation), the ordered plan is:
+Step 1 — Corpus: owner grants/approves the 20–50-page PHI-free benchmark corpus (D4 inputs 3 still pending from Phase 1); freeze manifest with the F11/E.2 schema.
+Step 2 — GPU worker: provision ONE execution environment for OLMoCR outside the main venv (local GPU worker or rented GPU box; Docker official image); pin model id + revision; verify cold-start and per-page runtime.
+Step 3 — Benchmark wrapper: packages/benchmark_core/benchmarks/ocr/olmocr.py implementing the existing benchmark_image/benchmark_text contract + markdown structure checks; run the 4-engine comparison; emit the report table.
+Step 4 — Decision point: owner reviews benchmark; if GO, branch feat/olmocr-central-engine; if NO-GO, archive evidence and stop.
+Step 5 — (only post-GO) canonical adapter implementing the EngineAdapter protocol returning contract OCRResult (engine="olmocr", metadata.markdown + page segments); registry _OLMoCRAdapter + DEFAULT_ADAPTERS; router ENGINE_OLMOCR in high/document profile only; configuration block default-off; unit tests mocked (no GPU in CI); documentation.
+Table 10. Files that would change vs must NOT change
+Category
+Paths
+Would change (post-GO)
+packages/benchmark_core/benchmarks/ocr/olmocr.py (new); packages/omni_ocr/contract/adapters/olmocr.py or packages/core/engines/olmocr_adapter.py (new, home fixed at implementation); packages/core/engine_registry.py (add stub + DEFAULT_ADAPTERS); packages/core/engine_router.py (constant + RAM + profile); packages/omni_ocr/contract/ CONTRACT_FIELD_MAPPING.md (one documented metadata key row); tests/contract or tests/unit (new mocked tests); docs
+Must NOT change
+main branch; app/services/ocr_service.py; hf-space/** (incl. byte-identical src/ocr mirror); desktop/**; mobile/**; apps/ocr-pipeline/**; packages/omni_ocr/adapter.py + mixed_engine.py (v1.2.2 §12 initial phase); medical-translation-bot; .github/workflows/** (this phase); PR #123 (untouched); requirements*.txt (transformers floors stay — conflict documented, not “fixed”); any archive; existing tests (owner directive: no test edits to reconcile counts)
+18. GO / NO-GO Criteria and Decision Request
+Table 11. GO criteria (all must hold) / NO-GO triggers
+#
+GO criterion (measurable)
+Current status
+1
+Arabic benchmark: Arabic CER/WER within owner-set threshold AND no catastrophic failure on Arabic medical terminology
+UNPROVEN
+2
+Structure benchmark: OLMoCR beats existing ensemble on tables/equations/multi-column structure metrics for English categories
+PARTIALLY PROVEN
+3
+GPU execution strategy owner-approved (local worker / rented GPU / none)
+UNPROVEN
+4
+Dependency strategy accepted: OLMoCR in separate env/container; repo transformers floors untouched
+PROVEN feasible
+5
+Licensing sign-off (Apache-2.0 stack; poppler as external binary)
+PROVEN clean
+6
+Cost acceptance at measured (not assumed) per-page figures
+ESTIMATE only
+NO-GO triggers: Arabic benchmark failure; no GPU available on any acceptable path; benchmark shows no structural advantage over the existing ensemble for the owner’s document types; upstream licensing change; any security finding that cannot be contained at adapter level.
+Decision requested from the owner: approve or reject the BENCHMARK PHASE ONLY (corpus grant + one GPU environment + a benchmark wrapper on a local branch, still without any production wiring). Per the standing stop-gate, no implementation, commit, push, merge, workflow, registry or production change will be made until the owner explicitly approves after seeing the benchmark results. This report itself changes nothing in the repository.
+Annex A. Test-Count Discrepancy Resolution (238 vs 114)
+Owner directive item 3 asked for a precise explanation of the contradiction between “238 tests passed, 1 skipped” and “114 passed, 1 skipped” in the Phase-1 reporting, with raw pytest output and without editing any test. Executed 2026-09-16 on the untouched branch (HEAD 0c41a45); no test file was modified, added or deleted; cache writing disabled (PYTHONDONTWRITEBYTECODE=1, -p no:cacheprovider).
+Table 12. Definitive enumeration
+Run
+Command (exact)
+Result
+Full repo collection
+pytest --collect-only -q
+1264 tests collected, 5 collection errors (missing deps in this env, e.g. jose) — errors are environmental, not test failures
+Full Phase-1 new-test surface
+pytest tests/contract tests/equivalence tests/characterization -q
+258 passed, 2 skipped, 0 failed in 4.8 s
+&gt;&gt;&gt; the “238” origin
+pytest tests/equivalence -q
+238 passed, 1 skipped — this is D5a+D5b ONLY: omnifile matrix 94 passed + archived matrix 144 passed + 1 skip (private-candidate blocker)
+&gt;&gt;&gt; the “114” origin
+pytest tests/contract tests/equivalence/omnifile tests/characterization -q
+114 passed, 1 skipped — contract 16 + D5a omnifile 94 + characterization 4 passed + 1 skip (paddle not installed). The D5b archived-matrix tests (145 items) are NOT in this run
+Per-file collection
+pytest &lt;dir&gt; --co -q ×4
+contract 16; equivalence/omnifile 94; equivalence/archived 145; characterization 5
+Explanation: both numbers are genuine pytest outputs of different subsets — neither is false, and neither equals the full Phase-1 surface. “238 passed, 1 skipped” was the D5 archaeology stage result (the two matrix suites together). “114 passed, 1 skipped”, labeled “Local combined” in the D7 completion report, actually combined only three of the four new test locations and silently omitted the 145 D5b archived-matrix items — the label “combined” was the defect, not the arithmetic. The arithmetic identity confirms the decomposition: 16+94+145+5 = 260 items = 258 passed + 2 skipped, matching the full-subset run exactly.
+Tests created in D5 (git diff main...HEAD --name-status = only additions; zero removals, zero renames): tests/equivalence/omnifile/test_omnifile_matrix.py (94 parametrized row tests, commit d72a087); tests/equivalence/archived/test_archived_matrix.py (145 parametrized row tests, 1 skip-by-blocker, commit c09f58a).
+Tests removed or renamed: NONE anywhere on the branch (evidence: git diff --name-status main...HEAD -- tests/ lists exclusively ‘A’ entries for 4 test files + fixtures).
+Other branch test files (not D5): tests/contract/test_result.py (16, D1) and tests/characterization/test_ocr_service_characterization.py (4+1 skip, D4).
+Correction for the record: the authoritative Phase-1 local-test figure should read “258 passed, 2 skipped” (full new-test surface). The repo-wide figure is 1264 collected + 5 environment-dependent collection errors; CI never ran because the branch is local-only (no credentials — recorded blocker F8).
+Raw outputs saved: download/olmocr-decision-report/evidence/test_count_discrepancy/
+  01_git_diff_tests_vs_main.txt  02_collect_full_repo.txt  03_run_phase1_subset_FULL.txt
+  04_run_A_equivalence_238.txt   05_run_C_114.txt         06_collect_per_file.txt
+Annex B. Evidence Index
+Table 13. Primary evidence register (all captured 2026-09-16, Asia/Damascus)
+Source
+Identifier / command
+Location on disk or network
+Owner repo state
+git rev-parse main HEAD; git status --porcelain; git ls-remote origin main
+repos/omni-medical-suite @ feat/ocr-consolidation-phase1 0c41a45; main 39640a6d = remote
+Upstream clone
+git clone --depth 1 https://github.com/allenai/olmocr
+repos/upstream/olmocr @ f7cfe4c (2026-03-25)
+PyPI releases
+GET pypi.org/pypi/olmocr/json
+latest 0.4.27 (2026-03-12)
+HF model card
+GET huggingface.co/allenai/olmOCR-2-7B-1025-FP8 (+ /raw/main/config.json)
+repos/upstream/olmocr-hf-card.md
+HF dataset card
+GET huggingface.co/datasets/allenai/olmOCR-mix-1025
+repos/upstream/olmocr-mix-card.md
+HF API probes
+models/ma7dev/olmOCR-qari (null); search qari; search olmocr arabic; models?blobs=true
+Docker Hub + HF API outputs in session record
+Docker Hub
+GET hub.docker.com/v2/repositories/alleninstituteforai/olmocr/tags
+latest 14.75 GB / latest-with-model 22.8 GB @ 2026-03-12
+arXiv abstract
+GET arxiv.org/abs/2510.19817
+olmOCR 2 paper abstract (RLVR, English-language bench)
+GitHub docs
+GET docs.github.com .../about-larger-runners
+GPU-powered larger runners exist (paid plans)
+Pytest evidence
+see Annex A file list
+download/olmocr-decision-report/evidence/test_count_discrepancy/ (6 files)
+Phase-1 pins
+AUDITS/ocr-phase1/{ENGINE_MAP,CONTRACT_FIELD_MAPPING,MIGRATION_PLAN_PHASE2_TO_4,PHASE1_COMPLETION_REPORT}.md
+on branch feat/ocr-consolidation-phase1
